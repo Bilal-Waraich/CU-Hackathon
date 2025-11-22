@@ -8,4 +8,3 @@ from constructor_model import ConstructorModel
 
 model = ConstructorModel()
 print(model.invoke("print hello world in c"))
-

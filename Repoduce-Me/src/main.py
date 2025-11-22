@@ -137,17 +137,24 @@ def create_and_install_venv(repo_path: Path):
 
 def create_demo_from_readme(repo_path: Path):
     """
-    Placeholder for the script that creates a demo from the cloned repository's README.
-    It should take the local path to the cloned repository as input.
+    Step 4: Call Constructor to generate a demo script from the cloned repo.
     """
-    print(f"\n--- STEP 4: Creating Demo from Readme... ---")
-    if repo_path and repo_path.is_dir():
-        # Add your demo creation logic here, e.g.,
-        # DemoCreator(repo_path).generate_example()
-        print(f"[INFO] Successfully called demo creation logic for: {repo_path}")
-    else:
-        print("[WARNING] Skipping demo creation: Repository path is invalid or clone failed.")
+    print(f"\n--- STEP 4: Creating Demo from Readme via Constructor LLM... ---")
 
+    if not repo_path or not repo_path.is_dir():
+        print("[WARNING] Skipping demo creation: Repository path is invalid or clone failed.")
+        return
+
+    creator = DemoCreator(repo_path)
+    demo_path = creator.generate_demo()
+
+    if demo_path:
+        print(f"[INFO] Demo script generated at: {demo_path}")
+        print("[INFO] You can now run it with something like:")
+        print(f"       cd {repo_path}")
+        print(f"       python {demo_path.name}")
+    else:
+        print("[WARNING] Demo generation failed or returned empty code.")
 
 def run_pipeline(input_path: str):
     """
@@ -174,7 +181,7 @@ def run_pipeline(input_path: str):
                 raise FileNotFoundError(f"Local file not found at: {pdf_path}")
 
         if not pdf_path:
-             raise ValueError("PDF file path could not be determined.")
+                raise ValueError("PDF file path could not be determined.")
 
         # STEP 2: Parse PDF for GitHub Repository URL
         print("\n--- STEP 2: Parsing PDF for GitHub Repository URL... ---")
