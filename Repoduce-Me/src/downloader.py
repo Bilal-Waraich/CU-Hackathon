@@ -4,53 +4,57 @@ import subprocess
 import time
 import stat
 from typing import Optional
-
 import urllib.request
 from pathlib import Path
 
 class Downloader:
     """
-    A utility class to clone a GitHub repository into a local 'tmp' directory.
+    A utility class to clone a GitHub repository and download PDFs.
 
-    It ensures the target 'tmp' directory is clean before every clone operation.
-    Requires the 'git' command-line tool to be installed and accessible in the system's PATH.
+    It provides functionality to clone into a specified target path (which
+    is essential for separating 'tmp' and 'workspace' clones).
     """
     
     def __init__(self, target_dir: str = "tmp", max_retries: int = 5, retry_delay: float = 1.0):
-
+        # target_dir is primarily used for PDF downloads and default cleanup
         self.target_dir = target_dir
         self.max_retries = max_retries
         self.retry_delay = retry_delay
 
     def _cleanup_error_handler(self, func, path, exc_info):
-
+        """
+        Custom error handler for shutil.rmtree to handle Windows permission errors.
+        (Retained and used for robust directory deletion)
+        """
         # The exception type is often PermissionError (a subclass of OSError) on WinError 5
         if issubclass(exc_info[0], PermissionError) or issubclass(exc_info[0], OSError):
-            
+            # Attempt to change file permissions to allow writing/deleting
             os.chmod(path, stat.S_IWUSR | stat.S_IWRITE)
             
             try:
+                # Retry the removal function
                 func(path)
                 return  
             except Exception:
-
+                # If retry fails, let the error propagate 
                 pass 
         
+        # If not a recognized cleanup error, or if retry failed, raise the original exception
         raise exc_info[0](exc_info[1]).with_traceback(exc_info[2])
-        
-    def _cleanup(self) -> None:
+    
+    def _cleanup_single_dir(self, directory: str) -> bool:
+        """Removes a single directory robustly using the error handler."""
+        path = Path(directory)
+        if not path.exists():
+            return True
 
-        if not os.path.exists(self.target_dir):
-            print(f"Target directory '{self.target_dir}' does not exist. Proceeding with clone.")
-            return
-
-        print(f"Cleaning up existing directory: '{self.target_dir}'...")
+        print(f"Cleaning up existing directory: '{path}'...")
         
         for attempt in range(1, self.max_retries + 1):
             try:
-                shutil.rmtree(self.target_dir, onerror=self._cleanup_error_handler)
-                print(f"Directory '{self.target_dir}' successfully deleted on attempt {attempt}.")
-                return 
+                shutil.rmtree(path, onerror=self._cleanup_error_handler)
+                print(f"Directory '{path}' successfully deleted on attempt {attempt}.")
+                return True
             except Exception as e:
                 if attempt < self.max_retries:
                     print(f"Cleanup attempt {attempt} failed: {type(e).__name__} - {e}. Retrying in {self.retry_delay}s...")
@@ -58,25 +62,31 @@ class Downloader:
                 else:
                     print(f"Error during directory cleanup after {self.max_retries} attempts: {e}")
                     raise 
+        return False
 
-    def download(self, github_link: str, branch: Optional[str] = None) -> bool:
+    def download(self, github_link: str, target_path: str, branch: Optional[str] = None) -> bool:
         """
-        Clones the specified GitHub repository into the target directory.
+        Clones the specified GitHub repository into the target_path.
+        
+        CRITICAL FIX: The target_path argument is now used as the destination in the git command.
         """
-
+        
+        # We perform cleanup *before* cloning, targeting the specific destination path.
         try:
-            self._cleanup()
+            # We use the target_path provided by main.py for cleanup
+            self._cleanup_single_dir(target_path) 
         except Exception:
             return False
 
-        print(f"Attempting to clone '{github_link}' into '{self.target_dir}'...")
+        print(f"Attempting to clone '{github_link}' into '{target_path}'...")
 
         command = ['git', 'clone']
         
         if branch:
             command.extend(['--branch', branch])
         
-        command.extend([github_link, self.target_dir])
+        # CRITICAL FIX: Use the flexible target_path provided by main.py
+        command.extend([github_link, target_path])
 
         try:
             result = subprocess.run(
@@ -123,6 +133,7 @@ class Downloader:
 
         for attempt in range(1, self.max_retries + 1):
             try:
+                # Use urllib.request as per original user code
                 with urllib.request.urlopen(pdf_url) as response:
                     if response.status != 200:
                         raise OSError(f"HTTP status {response.status}")
@@ -145,29 +156,3 @@ class Downloader:
                         f"Error downloading PDF after {self.max_retries} attempts: {e}"
                     )
                 return False
-
-
-if __name__ == "__main__":
-    TEST_TARGET_DIR = "tmp_repo" 
-    TEST_REPO_LINK = "" 
-    TEST_BRANCH = "main" 
-    TEST_PDF_URL = "https://arxiv.org/pdf/2507.06849"
-    
-    print("--- Downloader Test Start ---")
-
-    downloader = Downloader(target_dir=TEST_TARGET_DIR) 
-
-    print(f"\n--- FIRST DOWNLOAD (Creates directory '{TEST_TARGET_DIR}') ---")
-    success = downloader.download(TEST_REPO_LINK, branch=TEST_BRANCH)
-
-    if success:
-        print(f"\nTest passed! Repository contents are in the '{TEST_TARGET_DIR}' folder.")
-
-        print(f"\n--- SECOND DOWNLOAD (Tests the cleanup logic on '{TEST_TARGET_DIR}') ---")
-        downloader.download(TEST_REPO_LINK, branch=TEST_BRANCH)
-    else:
-        print("\nTest FAILED. Check the error messages above.")
-
-    downloader.download_pdf(TEST_PDF_URL)
-
-    print("\n--- Downloader Test Complete ---")

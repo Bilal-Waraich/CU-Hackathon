@@ -23,118 +23,125 @@ OPTIONAL FLAGS:
 import argparse
 import sys
 import time
+import shutil
 from pathlib import Path
 from typing import Optional
+
 from downloader import Downloader
 from paper_extracter import PaperParser
 from demo_creator import DemoCreator
 from venv_create import create_and_install_venv
-import shutil 
+from requirements_extract import RequirementsExtractor
 
-# Configuration
 
-# Temporary directory for:
-# - downloaded PDF
-# - temporary venv
-# - requirements.txt
 TMP_DIR = "tmp"
 PDF_OUTPUT_FILENAME = Path(TMP_DIR) / "downloaded_paper.pdf"
 
-# Persistent directory where cloned repositories will live by default
 WORKSPACE_DIR = "workspace"
+
+VENV_DIR = Path(TMP_DIR) / ".venv_repro"
+REQUIREMENTS_FILE = Path(TMP_DIR) / "requirements.txt"
+
 
 def _parse_repo_name_from_github_url(github_url: str) -> str:
     """
     Extract a reasonable repo directory name from a GitHub URL.
-    Example: https://github.com/user/radonpy.git -> radonpy
     """
-    tail = github_url.rstrip("/").split("/")[-1]
-    if tail.endswith(".git"):
-        tail = tail[:-4]
-    return tail or "cloned_repo"
+    # Strips everything up to the last slash and removes '.git' if present
+    name = github_url.split('/')[-1]
+    if name.lower().endswith('.git'):
+        name = name[:-4]
+    return name or "cloned_repo"
+
 
 def run_pipeline(input_path: str, istmp: bool, cleanup_tmp: bool, cleanup_workspace: bool):
     """
     The main orchestration function for the pipeline.
-
-    :param input_path: URL or local PDF path.
-    :param istmp: If True, clone repo into tmp/repo (ephemeral).
-                         If False, clone into workspace/<repo_name> (persistent).
     """
-    # Ensure tmp exists for PDF / venv / requirements
-    Path(TMP_DIR).mkdir(exist_ok=True)
-
-    pdf_downloader = Downloader(target_dir=TMP_DIR)
+    # Initialize Downloader, using TMP_DIR for PDF/default operations
+    downloader = Downloader(target_dir=str(TMP_DIR))
     pdf_path: Optional[Path] = None
+    repo_target_path: Path # Initialize outside try/except for cleanup reference
+
+    # Ensure the TMP_DIR exists before starting operations (for PDF/venv)
+    Path(TMP_DIR).mkdir(exist_ok=True) 
 
     try:
         # STEP 1: Handle Input (URL vs. Local PDF)
         if input_path.lower().startswith('http'):
             print("--- STEP 1: Input is a URL. Downloading PDF... ---")
-            if pdf_downloader.download_pdf(input_path, str(PDF_OUTPUT_FILENAME)):
+            if downloader.download_pdf(input_path, str(PDF_OUTPUT_FILENAME)):
                 pdf_path = PDF_OUTPUT_FILENAME
             else:
                 raise ConnectionError(f"Failed to download PDF from: {input_path}")
         else:
-            print("--- STEP 1: Input is a local PDF file. Skipping download... ---")
+            print(f"--- STEP 1: Input is a local PDF file. Skipping download... ---\n[INFO] Using local PDF file: {input_path}")
             pdf_path = Path(input_path)
             if not pdf_path.is_file():
                 raise FileNotFoundError(f"Local file not found at: {pdf_path}")
-            print(f"[INFO] Using local PDF file: {pdf_path}")
 
         if not pdf_path:
-            raise ValueError("PDF file path could not be determined.")
+                raise ValueError("PDF file path could not be determined.")
 
         # STEP 2: Parse PDF for GitHub Repository URL
         print("\n--- STEP 2: Parsing PDF for GitHub Repository URL... ---")
-        github_links: list[str] = PaperParser(str(pdf_path)).extract_github_link()
-
+        parser = PaperParser(str(pdf_path))
+        github_links: list[str] = parser.extract_github_link()
+        
+        github_url: str
         if not github_links:
-            print("[WARNING] No GitHub link found in the paper. Pipeline stops.")
-            return
-
-        github_url = github_links[0]
-        print(f"[SUCCESS] Found GitHub URL: {github_url}")
-
-        # Decide clone target directory
-        if istmp:
-            # Ephemeral repo clone inside tmp/, separate from venv/pdf
-            clone_dir = Path(TMP_DIR) / "repo"
-            print(f"[INFO] Cloning repository into ephemeral directory: {clone_dir}")
+            # Try to get the GitHub URL from the user-provided input URL itself
+            if "github.com" in input_path.lower():
+                 github_url = input_path
+                 print(f"[INFO] Using input URL as GitHub URL: {github_url}")
+            else:
+                print("[WARNING] No GitHub link found in the paper. Pipeline stops.")
+                return
         else:
-            # Persistent repo clone in workspace/<repo_name>
+            github_url = github_links[0]
+            print(f"[SUCCESS] Found GitHub URL: {github_url}")
+
+        # Determine the final clone target path based on the flag
+        if istmp:
+            # Clone repo into tmp/repo
+            repo_target_path = Path(TMP_DIR) / "repo"
+        else:
+            # Clone repo into workspace/<repo_name> (Persistent)
             repo_name = _parse_repo_name_from_github_url(github_url)
-            clone_dir = Path(WORKSPACE_DIR) / repo_name
-            print(f"[INFO] Cloning repository into workspace directory: {clone_dir}")
+            repo_target_path = Path(WORKSPACE_DIR) / repo_name
+            Path(WORKSPACE_DIR).mkdir(exist_ok=True) # Ensure workspace dir exists
 
-        clone_dir.parent.mkdir(parents=True, exist_ok=True)
-
+        
         # STEP 3: Cloning GitHub Repository
         print("\n--- STEP 3: Cloning GitHub Repository... ---")
-        repo_downloader = Downloader(target_dir=str(clone_dir))
-        clone_success = repo_downloader.download(github_url)
+        # Ensure the parent directory is created before cloning (if it's not workspace/ or tmp/)
+        repo_target_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # CRITICAL FIX: The downloader.download method now expects the target_path.
+        clone_success = downloader.download(github_url, str(repo_target_path))
+        
         if not clone_success:
+            # The downloader already printed the error details
             raise RuntimeError(f"Git clone failed for repository: {github_url}")
+        
+        print(f"[SUCCESS] Repository successfully cloned into: {repo_target_path}")
+        
+        # STEP 4: Dependency Extraction
+        print("\n--- STEP 4: Dependency Extraction using RequirementsExtractor... ---")
+        extractor = RequirementsExtractor(output_dir=str(TMP_DIR))
+        extractor.analyze_repo(repo_target_path)
+        print(f"[SUCCESS] Dependencies written to: {REQUIREMENTS_FILE.name}")
+        
+        # STEP 5: Virtual Environment Setup & Installation
+        print(f"\n--- STEP 5: Setting up Virtual Environment in {VENV_DIR.name}... ---")
+        # Ensure venv_create is called with the correct path
+        create_and_install_venv(repo_target_path)
 
-        cloned_repo_path = clone_dir
-        print(f"[SUCCESS] Repository successfully cloned into: {cloned_repo_path}")
+        # STEP 6: Demo Creation
+        print("\n--- STEP 6: Creating Demo from Readme via Constructor LLM... ---")
+        DemoCreator().create_demo(repo_target_path)
+        print("[INFO] Demo creation attempt complete.")
 
-        # STEP 4: Virtual Environment Setup & Installation (under tmp/)
-        create_and_install_venv(cloned_repo_path)
-
-        # STEP 5: Demo Creation via Constructor LLM
-        print("\n--- STEP 5: Creating Demo from Readme via Constructor LLM... ---")
-        creator = DemoCreator(cloned_repo_path)
-        demo_path = creator.generate_demo()
-
-        if demo_path:
-            print(f"[INFO] Demo script generated at: {demo_path}")
-            print("[INFO] You can now run it with something like:")
-            print(f"       cd {cloned_repo_path}")
-            print(f"       python {demo_path.name}")
-        else:
-            print("[WARNING] Demo generation failed or returned empty code.")
 
     # --- Error Handling ---
     except FileNotFoundError as e:
@@ -147,28 +154,26 @@ def run_pipeline(input_path: str, istmp: bool, cleanup_tmp: bool, cleanup_worksp
         print(f"[ERROR] Data validation failed: {e}", file=sys.stderr)
         sys.exit(1)
     except RuntimeError as e:
-        print(f"[ERROR] Command execution failed (e.g., git, venv, or pipreqs): {e}", file=sys.stderr)
+        print(f"[ERROR] Command execution failed (e.g., git, venv, or dependency install): {e}", file=sys.stderr)
+        # Allow finally block to run cleanup
         sys.exit(1)
     except Exception as e:
         print(f"[FATAL] An unexpected error occurred: {type(e).__name__} - {e}", file=sys.stderr)
         sys.exit(1)
         
     finally:
-        if cleanup_tmp:
-            try:
-                print("[INFO] Cleaning up tmp/ directory...")
-                shutil.rmtree(TMP_DIR, ignore_errors=True)
-                print("[SUCCESS] tmp/ cleaned.")
-            except Exception as e:
-                print(f"[WARNING] Failed to clean tmp/: {e}")
-
-        if cleanup_workspace:
-            try:
-                print("[INFO] Cleaning up workspace/ directory...")
-                shutil.rmtree(WORKSPACE_DIR, ignore_errors=True)
-                print("[SUCCESS] workspace/ cleaned.")
-            except Exception as e:
-                print(f"[WARNING] Failed to clean workspace/: {e}")
+        # --- Cleanup ---
+        # The final cleanup block ensures directories are removed if requested
+        if cleanup_tmp and Path(TMP_DIR).exists():
+            print(f"[INFO] Cleaning up tmp/ directory...")
+            shutil.rmtree(TMP_DIR, ignore_errors=True)
+        
+        if cleanup_workspace and Path(WORKSPACE_DIR).exists():
+            print(f"[INFO] Cleaning up workspace/ directory...")
+            # We assume the cleanup_workspace flag means cleaning the entire workspace
+            # or relying on the calling script to manage it if only specific repo cleanup is needed.
+            # For simplicity here, we clear the entire WORKSPACE_DIR if the flag is set.
+            shutil.rmtree(WORKSPACE_DIR, ignore_errors=True)
 
 
 if __name__ == "__main__":
@@ -207,7 +212,7 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    print(f"\n--- Starting Pipeline Execution with Input: {args.input} ---")
+    print(f"\n--- Starting Pipeline Execution with Input: {args.input} ---\n")
     
     # Start timing
     start_time = time.time()
@@ -216,9 +221,10 @@ if __name__ == "__main__":
         args.input,
         istmp=args.tmp,
         cleanup_tmp=args.cleanup_tmp or args.cleanup_all,
-        cleanup_workspace=args.cleanup_workspace or args.cleanup_all,
+        cleanup_workspace=args.cleanup_workspace or args.cleanup_all
     )
-
+    
+    # End timing and report duration
     end_time = time.time()
     duration = end_time - start_time
     print(f"\n--- Pipeline Complete in {duration:.2f} seconds. ---")

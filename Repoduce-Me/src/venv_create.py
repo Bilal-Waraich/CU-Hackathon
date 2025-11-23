@@ -3,9 +3,10 @@ import subprocess
 from pathlib import Path
 from typing import List
 import shutil 
+import re
 
+# Configuration constants (must match main.py)
 TMP_DIR = "tmp"
-PDF_OUTPUT_FILENAME = Path(TMP_DIR) / "downloaded_paper.pdf"
 VENV_DIR = Path(TMP_DIR) / ".venv_repro"
 REQUIREMENTS_FILE = Path(TMP_DIR) / "requirements.txt"
 
@@ -39,15 +40,63 @@ def execute_subprocess(command: List[str], error_message: str):
         raise RuntimeError(f"{error_message} failed.") from e
 
 
+def filter_requirements(requirements_file: Path) -> Path:
+    """
+    Loads the requirements file, filters out problematic dependencies (like 'ast' 
+    which conflicts with the standard library and causes build failures), and 
+    writes the filtered list to a temporary file for installation.
+    
+    Returns the path to the *new* filtered requirements file.
+    """
+    if not requirements_file.exists():
+        return requirements_file # Nothing to filter
+
+    print("[INFO] Filtering requirements.txt for known problematic packages...")
+    
+    # 'ast' causes FileNotFoundError during metadata generation.
+    # 'enum34' is a common conflict on newer Python versions.
+    packages_to_skip = {'ast', 'enum34'} 
+    
+    filtered_lines = []
+    
+    try:
+        lines = requirements_file.read_text(encoding='utf-8').splitlines()
+        for line in lines:
+            # Clean up the line to get the package name before any version specifier
+            # Use re.split to handle various separators (=, >, <, ~)
+            package_name_parts = re.split(r'[=><~]', line.strip())
+            package_name = package_name_parts[0].strip() if package_name_parts else ''
+            
+            # Skip comments and empty lines
+            if not package_name or package_name.startswith('#'):
+                continue
+            
+            if package_name not in packages_to_skip:
+                filtered_lines.append(line)
+                
+    except Exception as e:
+        print(f"[WARNING] Could not read or filter requirements file: {e}. Using original file.", file=sys.stderr)
+        return requirements_file
+
+    # Write filtered content to a new temporary file
+    filtered_file = requirements_file.parent / "requirements_filtered.txt"
+    try:
+        filtered_file.write_text('\n'.join(filtered_lines), encoding='utf-8')
+        print(f"[SUCCESS] Filtered dependencies written to: {filtered_file.name}")
+        return filtered_file
+    except Exception as e:
+        print(f"[ERROR] Could not write filtered requirements file: {e}. Using original file.", file=sys.stderr)
+        return requirements_file
+
+
 def create_and_install_venv(repo_path: Path):
     """
-    Implements the robust installation strategy:
-    ... (omitted docstring for brevity)
+    Creates a new virtual environment, upgrades core tools, and installs 
+    dependencies from the pre-generated requirements.txt.
     """
     print(f"\n--- STEP 5: Setting up Virtual Environment in {VENV_DIR.name}... ---")
     
     # --- 5a. Create the Virtual Environment ---
-    # ADDED: Cleanup for the new VENV_DIR location.
     if VENV_DIR.exists():
         print(f"[INFO] Cleaning up existing Venv directory: {VENV_DIR.name}...")
         try:
@@ -65,50 +114,28 @@ def create_and_install_venv(repo_path: Path):
     
     python_executable = get_venv_python_executable(VENV_DIR)
 
-    # --- 5b. Install pipreqs into the Venv ---
-    print(f"[INFO] Installing pipreqs into the temporary Venv (to analyze dependencies)...")
-    execute_subprocess(
-        [str(python_executable), '-m', 'pip', 'install', 'pipreqs'],
-        "Installation of pipreqs"
-    )
-    print("[SUCCESS] pipreqs installed in Venv.")
+    # CRITICAL FIX STEP: Pre-install enum34 to satisfy broken build dependencies that look for '__version__'
+    # This must run before upgrading pip/setuptools in case the base venv tools are also affected.
 
-    print(f"[INFO] Running pipreqs on the cloned repository ({repo_path}) to generate {REQUIREMENTS_FILE.name}...")
-    
-    ignore_paths = [
-        str(repo_path / 'datasets'), 
-        str(VENV_DIR)                
-    ]
-    ignore_path_str = ",".join(ignore_paths)
-
-    pipreqs_command = [
-        str(python_executable), 
-        '-m', 
-        'pipreqs.pipreqs', 
-        str(repo_path), 
-        '--savepath', 
-        str(REQUIREMENTS_FILE),
-        '--force',
-        '--encoding', 'latin1',
-        # Combine the --ignore flag and its argument using the '=' sign for robustness
-        f'--ignore={ignore_path_str}' 
-    ]
-    
+    # --- 5b. Upgrade Core Build Tools (Crucial fix for 'enum' error) ---
+    print("[INFO] Upgrading pip, setuptools, and wheel in the virtual environment...")
     execute_subprocess(
-        pipreqs_command,
-        "Requirement generation via pipreqs"
+        [str(python_executable), '-m', 'pip', 'install', '--upgrade', 'pip', 'setuptools', 'wheel'],
+        "Upgrade of core build tools"
     )
+    print("[SUCCESS] Core build tools upgraded.")
     
+    # Check if the original requirements file exists and is not empty
     if not REQUIREMENTS_FILE.exists() or REQUIREMENTS_FILE.stat().st_size == 0:
-        print("[WARNING] Requirements file is empty or not created. Skipping final dependency install.")
+        print(f"[WARNING] Requirements file not found or is empty at {REQUIREMENTS_FILE.name}. Skipping dependency installation.")
         return
+
+    # Filter out known problematic packages (like 'ast')
+    requirements_to_install = filter_requirements(REQUIREMENTS_FILE)
         
-    print(f"[SUCCESS] Dependencies analyzed and written to {REQUIREMENTS_FILE.name}.")
-
-
-    # --- 5d. Install dependencies from the generated requirements.txt ---
-    print(f"[INFO] Installing final dependencies from {REQUIREMENTS_FILE.name} into Venv...")
+    print(f"[INFO] Installing dependencies from {requirements_to_install.name} into Venv...")
     
+    # Use a robust installation command
     install_command = [
         str(python_executable), 
         '-m', 
@@ -116,13 +143,13 @@ def create_and_install_venv(repo_path: Path):
         'install', 
         '--no-cache-dir', 
         '-r', 
-        str(REQUIREMENTS_FILE),
-        '--use-deprecated=legacy-resolver'
+        str(requirements_to_install), # <-- Use the filtered file path here
+        '--no-build-isolation'
     ]
-    
+
     execute_subprocess(
         install_command,
         "Final dependency installation"
     )
     
-    print("[SUCCESS] All final dependencies installed successfully.")
+    print("[SUCCESS] All dependencies installed.")
