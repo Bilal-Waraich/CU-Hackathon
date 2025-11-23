@@ -1,7 +1,8 @@
 import re
 import os
 from pathlib import Path
-from typing import Set, Optional, List
+from typing import Set, Optional, List, Dict
+
 
 class RequirementsExtractor:
     """
@@ -83,19 +84,38 @@ class RequirementsExtractor:
         'cryptography': 'cryptography',
     }
 
+    # Directories to skip entirely when walking the repo
+    IGNORE_DIRS: Set[str] = {
+        '.git', '.hg', '.svn',
+        '__pycache__',
+        '.venv', 'venv', 'env',
+        'build', 'dist',
+        'node_modules',
+    }
+
+    # Regex patterns
+    _IMPORT_RE = re.compile(r'^\s*import\s+(.+)')
+    _FROM_RE = re.compile(r'^\s*from\s+([a-zA-Z0-9_.]+)\s+import\s+')
+
     def __init__(self, output_dir: str = "tmp"):
         """
-        Initializes the extractor with the directory where the requirements.txt 
+        Initializes the extractor with the directory where the requirements.txt
         will be written.
         """
         self.output_dir = Path(output_dir)
         self.output_file = self.output_dir / "requirements.txt"
         self.all_dependencies: Set[str] = set()
 
-    def _extract_module_name(self, line: str) -> Optional[str]:
+    # ---- Core logic ---------------------------------------------------------
+
+    def _extract_modules_from_line(self, line: str) -> Set[str]:
         """
-        Extracts the top-level module name from an import statement line.
+        Extracts one or more top-level module names from a single import line.
+        Handles:
+          - import a, b as c
+          - from a.b import x, y
         """
+        modules: Set[str] = set()
         line = line.strip()
 
         # Simple filter for comments, docstrings, and empty lines
@@ -128,7 +148,7 @@ class RequirementsExtractor:
         """
         repo_path = Path(repo_path)
         print(f"[INFO] Starting dependency analysis in: {repo_path}")
-        
+
         if not repo_path.is_dir():
             print(f"[ERROR] Repository path not found: {repo_path}")
             return
@@ -139,22 +159,22 @@ class RequirementsExtractor:
             dirs[:] = [d for d in dirs if not d.startswith('.')]
             
             for file_name in files:
-                if file_name.endswith(".py"):
-                    file_path = Path(root) / file_name
-                    self._analyze_file(file_path)
+                if not file_name.endswith(".py"):
+                    continue
+                file_path = Path(root) / file_name
+                self._analyze_file(file_path)
 
-        # 1. Filter out standard library modules
+        # Filter out standard library modules
         external_dependencies = self.all_dependencies - self.STANDARD_LIBRARY
-        
-        # 2. Apply the name mapping (e.g., PIL -> Pillow)
-        final_dependencies = set()
+
+        # Apply the name mapping (e.g., PIL -> Pillow)
+        final_dependencies: Set[str] = set()
         for dep in external_dependencies:
             # Check for the mapping, defaulting to the original import name if no mapping found
             install_name = self.IMPORT_TO_INSTALL_NAME.get(dep, dep)
             final_dependencies.add(install_name)
-            
-        sorted_dependencies = sorted(list(final_dependencies))
-        
+
+        sorted_dependencies = sorted(final_dependencies)
         self._write_requirements_file(sorted_dependencies)
 
     def _analyze_file(self, file_path: Path):
@@ -190,23 +210,22 @@ class RequirementsExtractor:
 
     def _write_requirements_file(self, dependencies: List[str]):
         """Writes the collected external dependencies to requirements.txt."""
-        
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         try:
             # Write dependencies without version specifiers
             with open(self.output_file, 'w') as f:
                 for dep in dependencies:
                     f.write(f"{dep}\n")
-            
+
             print(f"\n[SUCCESS] Extracted {len(dependencies)} external dependencies.")
             print(f"[SUCCESS] Requirements file written to: {self.output_file.resolve()}")
-            
         except Exception as e:
             print(f"[ERROR] Failed to write requirements.txt: {e}")
 
+
 if __name__ == "__main__":
-    # Example usage for testing
+    # Simple self-test
     TEST_DIR = Path("test_repo_for_reqs")
     TEST_DIR.mkdir(exist_ok=True)
     
