@@ -3,6 +3,8 @@ import os
 import sys
 import time
 import subprocess
+import os
+import shutil
 from pathlib import Path
 from typing import Optional, List
 import shutil 
@@ -156,7 +158,7 @@ def create_demo_from_readme(repo_path: Path):
     else:
         print("[WARNING] Demo generation failed or returned empty code.")
 
-def run_pipeline(input_path: str):
+def run_pipeline(input_path: str, github_link: str,  istmp: bool, cleanup_tmp: bool, cleanup_workspace: bool, auto_run: bool):
     """
     The main orchestration function for the pipeline.
     """
@@ -202,16 +204,40 @@ def run_pipeline(input_path: str):
         if not clone_success:
             raise RuntimeError(f"Git clone failed for repository: {github_url}")
         
-        print(f"[SUCCESS] Repository successfully cloned into: {cloned_repo_path}")
-        
-        # STEP 4: Dependency Extraction (now integrated into Step 5 using pipreqs)
-        print("\n--- STEP 4: Dependency Extraction is integrated into Step 5 using pipreqs. ---")
+        print(f"[SUCCESS] Repository successfully cloned into: {repo_target_path}")
 
-        # STEP 5: Virtual Environment Setup & Installation
-        create_and_install_venv(cloned_repo_path)
+        # STEP 4: Dependency Extraction
+        print("\n--- STEP 4: Dependency Extraction using RequirementsExtractor... ---")
+        extractor = RequirementsExtractor(repo_dir=repo_target_path, output_dir=str(TMP_DIR))
+        deps = extractor.extract()
+        if deps and deps[0] == "pyproject":
+            print("[INFO] pyproject.toml detected – installation will be handled via pip install .")
+        elif deps and deps[0] == "setup":
+            print("[INFO] setup.py/setup.cfg detected – installation will be handled via pip install .")
+        else:
+            print(f"[SUCCESS] requirements.txt generated with {len(deps)} dependencies at {REQUIREMENTS_FILE}")
+        
+        print(f"\n--- STEP 5: Setting up Virtual Environment in {VENV_DIR.name}... ---")
+        create_and_install_venv(repo_target_path)
 
         # STEP 6: Demo Creation
-        create_demo_from_readme(cloned_repo_path)
+        print("\n--- STEP 6: Creating Demo from Readme via Constructor LLM... ---")
+        creator = DemoCreator(repo_target_path)
+        demo_path = creator.generate_demo()
+
+        if demo_path:
+            print(f"[INFO] Demo script generated at: {demo_path}")
+            print("[INFO] You can now run it with something like:")
+            print(f"       cd {repo_target_path}")
+            print(f"       python {demo_path.name}")
+        else:
+            print("[WARNING] Demo generation failed or returned empty code.")
+
+        # STEP 7: Bash Bash Bash
+        print("\n--- STEP 6: Creating Demo from Readme via Constructor LLM... ---")
+        
+        if deps and deps[0] in ["pyproject","setup"]:
+
 
     # --- Error Handling ---
     except FileNotFoundError as e:
@@ -231,7 +257,17 @@ def run_pipeline(input_path: str):
         sys.exit(1)
         
     finally:
-        pass
+        # The final cleanup block ensures directories are removed if requested
+        if cleanup_tmp and Path(TMP_DIR).exists():
+            print(f"[INFO] Cleaning up tmp/ directory...")
+            shutil.rmtree(TMP_DIR, ignore_errors=True)
+        
+        if cleanup_workspace and Path(WORKSPACE_DIR).exists():
+            print(f"[INFO] Cleaning up workspace/ directory...")
+            # We assume the cleanup_workspace flag means cleaning the entire workspace
+            # or relying on the calling script to manage it if only specific repo cleanup is needed.
+            # For simplicity here, we clear the entire WORKSPACE_DIR if the flag is set.
+            shutil.rmtree(WORKSPACE_DIR, ignore_errors=True)
 
 
 if __name__ == "__main__":
@@ -243,6 +279,12 @@ if __name__ == "__main__":
         type=str,
         help="The input source, which can be either a full URL (e.g., http://arxiv.org/...) or a local path to a PDF file (e.g., ./paper.pdf)."
     )
+
+    parser.add_argument(
+        "--auto-run",
+        action="store_true",
+        help="Fag to automatically run the scientific code."
+    )
     
     args = parser.parse_args()
     
@@ -250,8 +292,15 @@ if __name__ == "__main__":
     
     # Start timing
     start_time = time.time()
-    
-    run_pipeline(args.input)
+
+    run_pipeline(
+        args.input,
+        github_link=args.github,
+        istmp=args.tmp,
+        cleanup_tmp=args.cleanup_tmp or args.cleanup_all,
+        cleanup_workspace=args.cleanup_workspace or args.cleanup_all,
+        auto_run=args.auto-run
+    )
     
     # End timing and report duration
     end_time = time.time()
