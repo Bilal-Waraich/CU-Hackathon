@@ -63,24 +63,24 @@ def create_and_install_venv(repo_dir: str, use_repo_install: bool, has_extracted
     )
     print("[SUCCESS] Core build tools upgraded.")
 
-    # --- 5b. Pre-installing Critical Build Dependencies (Cython, numpy, scipy) ---
-    # This step is crucial for scientific packages that need these installed before compilation.
-    packages_to_preinstall = ['Cython', 'numpy', 'scipy']
-    print(f"[INFO] Pre-installing critical build dependencies: {', '.join(packages_to_preinstall)}...")
+    # # --- 5b. Pre-installing Critical Build Dependencies (numpy, scipy) ---
+    # # This step is crucial for scientific packages that need these installed before compilation.
+    # packages_to_preinstall = ['numpy', 'scipy']
+    # print(f"[INFO] Pre-installing critical build dependencies: {', '.join(packages_to_preinstall)}...")
     
-    # Prioritize numpy and scipy first if they are on the list
-    for package in ['numpy', 'scipy', 'Cython']:
-        if package in packages_to_preinstall:
-            try:
-                execute_subprocess(
-                    [str(python_executable), '-m', 'pip', 'install', package],
-                    f"Pre-installation of {package}"
-                )
-                print(f"[SUCCESS] '{package}' pre-installed.")
-                packages_to_preinstall.remove(package)
-            except Exception as e:
-                # Log warning and continue to main installation
-                print(f"[WARNING] Failed to pre-install {package}: {e}. Proceeding with main installation.", file=sys.stderr)
+    # # Prioritize numpy and scipy first if they are on the list
+    # for package in ['numpy', 'scipy']:
+    #     if package in packages_to_preinstall:
+    #         try:
+    #             execute_subprocess(
+    #                 [str(python_executable), '-m', 'pip', 'install', package],
+    #                 f"Pre-installation of {package}"
+    #             )
+    #             print(f"[SUCCESS] '{package}' pre-installed.")
+    #             packages_to_preinstall.remove(package)
+    #         except Exception as e:
+    #             # Log warning and continue to main installation
+    #             print(f"[WARNING] Failed to pre-install {package}: {e}. Proceeding with main installation.", file=sys.stderr)
 
     # --- 5c. Main Dependency Installation ---
     install_command: List[str]
@@ -98,7 +98,6 @@ def create_and_install_venv(repo_dir: str, use_repo_install: bool, has_extracted
             'install', 
             '--no-cache-dir', 
             str(repo_path),
-            '--no-build-isolation'
         ]
         
         execute_subprocess(
@@ -120,7 +119,6 @@ def create_and_install_venv(repo_dir: str, use_repo_install: bool, has_extracted
             '--no-cache-dir', 
             '-r', 
             str(REQUIREMENTS_FILTERED_FILE),
-            '--no-build-isolation',
         ]
         
         execute_subprocess(
