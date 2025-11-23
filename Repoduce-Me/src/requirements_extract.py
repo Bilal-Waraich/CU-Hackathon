@@ -8,13 +8,12 @@ class RequirementsExtractor:
     Scans a cloned repository directory to identify external Python package dependencies
     by looking for 'import' and 'from ... import' statements.
     
-    This version includes the comprehensive standard library exclusion list and the 
-    extended module-to-package mapping dictionary derived from common practice and 
-    tools like pipreqs.
+    This version includes the comprehensive standard library exclusion list, the 
+    extended module-to-package mapping dictionary, and a debug blacklist for
+    unresolved dependencies.
     """
 
     # --- 1. Comprehensive Standard Library Modules (Exclusion List) ---
-    # These modules are part of the Python core and should NOT be included in requirements.txt.
     STANDARD_LIBRARY: Set[str] = {
         '__future__', '__main__', '_dummy_thread', '_thread', 'abc', 'aifc', 
         'antigravity', 'argparse', 'array', 'ast', 'asynchat', 'asyncio', 
@@ -69,8 +68,8 @@ class RequirementsExtractor:
         'tqdm': 'tqdm',
         'numpy': 'numpy',
         'pandas': 'pandas',
-        'ax': 'matplotlib', # Common matplotlib alias
-        'mpl': 'matplotlib', # Common matplotlib alias
+        'ax': 'matplotlib',
+        'mpl': 'matplotlib',
         'dateutil': 'python-dateutil',
         'h5py': 'h5py',
         'skvideo': 'scikit-video',
@@ -78,9 +77,15 @@ class RequirementsExtractor:
         'pytz': 'pytz',
         'xlrd': 'xlrd',
         'cairosvg': 'CairoSVG',
-        # Using pycryptodome as the modern recommended replacement
         'Crypto': 'pycryptodome', 
         'cryptography': 'cryptography',
+    }
+    
+    # --- 3. Debug/Temporary Blacklist (For modules that are local or unknown) ---
+    # This list is used to temporarily ignore modules that exist in the code but 
+    # are not standard library and cannot be found on PyPI (like astropilot).
+    DEBUG_BLACKLIST: Set[str] = {
+        'astropilot', 
     }
 
     def __init__(self, output_dir: str = "tmp"):
@@ -93,9 +98,6 @@ class RequirementsExtractor:
         self.all_dependencies: Set[str] = set()
 
     def _extract_module_name(self, line: str) -> Optional[str]:
-        """
-        Extracts the top-level module name from an import statement line.
-        """
         line = line.strip()
 
         # Simple filter for comments, docstrings, and empty lines
@@ -122,6 +124,7 @@ class RequirementsExtractor:
             
         return None
 
+
     def analyze_repo(self, repo_path: Path):
         """
         Walks the repository directory, analyzes Python files, and writes dependencies.
@@ -134,8 +137,7 @@ class RequirementsExtractor:
             return
 
         for root, dirs, files in os.walk(repo_path, topdown=True):
-            # Skip hidden/system directories (e.g., .git, .vscode)
-            # This also filters out our Venv: .venv_repro
+            # Exclude hidden directories (like .git, .venv, etc.)
             dirs[:] = [d for d in dirs if not d.startswith('.')]
             
             for file_name in files:
@@ -143,13 +145,11 @@ class RequirementsExtractor:
                     file_path = Path(root) / file_name
                     self._analyze_file(file_path)
 
-        # 1. Filter out standard library modules
-        external_dependencies = self.all_dependencies - self.STANDARD_LIBRARY
-        
-        # 2. Apply the name mapping (e.g., PIL -> Pillow)
+        excluded_modules = self.STANDARD_LIBRARY | self.DEBUG_BLACKLIST
+        external_dependencies = self.all_dependencies - excluded_modules
+
         final_dependencies = set()
         for dep in external_dependencies:
-            # Check for the mapping, defaulting to the original import name if no mapping found
             install_name = self.IMPORT_TO_INSTALL_NAME.get(dep, dep)
             final_dependencies.add(install_name)
             
@@ -162,10 +162,8 @@ class RequirementsExtractor:
         Reads a single Python file, extracts dependencies, and handles common parsing errors.
         """
         try:
-            # Attempt to read the file content
             content = file_path.read_text(encoding='utf-8')
         except UnicodeDecodeError:
-            # Fallback to a more permissive encoding like latin-1 if utf-8 fails
             try:
                 content = file_path.read_text(encoding='latin-1')
             except Exception as e:
@@ -176,16 +174,12 @@ class RequirementsExtractor:
             return
         
         try:
-            # We rely on resilient line-by-line regex matching, which is much less likely to fail 
-            # due to complex f-string syntax or incomplete Python code compared to ast.parse().
-            
             for line in content.splitlines():
                 module_name = self._extract_module_name(line)
                 if module_name:
                     self.all_dependencies.add(module_name)
 
         except Exception as e:
-             # This catch block is mostly for safety against unforeseen regex/processing errors
             print(f"[WARNING] Could not analyze imports in file {file_path}: {e}. Skipping file.")
 
     def _write_requirements_file(self, dependencies: List[str]):
@@ -194,7 +188,6 @@ class RequirementsExtractor:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         try:
-            # Write dependencies without version specifiers
             with open(self.output_file, 'w') as f:
                 for dep in dependencies:
                     f.write(f"{dep}\n")
@@ -204,29 +197,3 @@ class RequirementsExtractor:
             
         except Exception as e:
             print(f"[ERROR] Failed to write requirements.txt: {e}")
-
-if __name__ == "__main__":
-    # Example usage for testing
-    TEST_DIR = Path("test_repo_for_reqs")
-    TEST_DIR.mkdir(exist_ok=True)
-    
-    # Example with different import names
-    (TEST_DIR / "test1.py").write_text("""
-import os
-import requests 
-import PIL.Image as Image # <-- Mapped to Pillow
-from numpy import array 
-from sklearn.metrics import accuracy_score # <-- Mapped to scikit-learn
-import matplotlib.pyplot as plt
-import bs4 
-import gdown.download
-from dateutil import parser
-""")
-    
-    extractor = RequirementsExtractor(output_dir="tmp_output")
-    extractor.analyze_repo(TEST_DIR)
-
-    # Clean up dummy files
-    import shutil
-    shutil.rmtree(TEST_DIR, ignore_errors=True)
-    shutil.rmtree("tmp_output", ignore_errors=True)

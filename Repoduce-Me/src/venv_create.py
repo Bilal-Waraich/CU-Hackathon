@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import List
 import shutil 
 
+# Configuration constants (must match main.py)
 TMP_DIR = "tmp"
-PDF_OUTPUT_FILENAME = Path(TMP_DIR) / "downloaded_paper.pdf"
 VENV_DIR = Path(TMP_DIR) / ".venv_repro"
 REQUIREMENTS_FILE = Path(TMP_DIR) / "requirements.txt"
 
@@ -41,13 +41,12 @@ def execute_subprocess(command: List[str], error_message: str):
 
 def create_and_install_venv(repo_path: Path):
     """
-    Implements the robust installation strategy:
-    ... (omitted docstring for brevity)
+    Creates a new virtual environment, upgrades core tools, and installs 
+    dependencies from the pre-generated requirements.txt.
     """
     print(f"\n--- STEP 5: Setting up Virtual Environment in {VENV_DIR.name}... ---")
     
     # --- 5a. Create the Virtual Environment ---
-    # ADDED: Cleanup for the new VENV_DIR location.
     if VENV_DIR.exists():
         print(f"[INFO] Cleaning up existing Venv directory: {VENV_DIR.name}...")
         try:
@@ -65,50 +64,32 @@ def create_and_install_venv(repo_path: Path):
     
     python_executable = get_venv_python_executable(VENV_DIR)
 
-    # --- 5b. Install pipreqs into the Venv ---
-    print(f"[INFO] Installing pipreqs into the temporary Venv (to analyze dependencies)...")
+    # CRITICAL FIX STEP: Pre-install enum34 to satisfy broken build dependencies that look for '__version__'
+    # This must run before upgrading pip/setuptools in case the base venv tools are also affected.
+    print("[INFO] Attempting fix: Pre-installing 'enum34' to resolve recurrent build dependency errors...")
     execute_subprocess(
-        [str(python_executable), '-m', 'pip', 'install', 'pipreqs'],
-        "Installation of pipreqs"
+        [str(python_executable), '-m', 'pip', 'install', 'enum34'],
+        "Pre-installation of enum34"
     )
-    print("[SUCCESS] pipreqs installed in Venv.")
+    print("[SUCCESS] 'enum34' installed (attempting to patch build environment).")
 
-    print(f"[INFO] Running pipreqs on the cloned repository ({repo_path}) to generate {REQUIREMENTS_FILE.name}...")
-    
-    ignore_paths = [
-        str(repo_path / 'datasets'), 
-        str(VENV_DIR)                
-    ]
-    ignore_path_str = ",".join(ignore_paths)
-
-    pipreqs_command = [
-        str(python_executable), 
-        '-m', 
-        'pipreqs.pipreqs', 
-        str(repo_path), 
-        '--savepath', 
-        str(REQUIREMENTS_FILE),
-        '--force',
-        '--encoding', 'latin1',
-        # Combine the --ignore flag and its argument using the '=' sign for robustness
-        f'--ignore={ignore_path_str}' 
-    ]
-    
+    # --- 5b. Upgrade Core Build Tools (Crucial fix for 'enum' error) ---
+    print("[INFO] Upgrading pip, setuptools, and wheel in the virtual environment...")
     execute_subprocess(
-        pipreqs_command,
-        "Requirement generation via pipreqs"
+        [str(python_executable), '-m', 'pip', 'install', '--upgrade', 'pip', 'setuptools', 'wheel'],
+        "Upgrade of core build tools"
     )
+    print("[SUCCESS] Core build tools upgraded.")
+
+    # --- 5c. Check for requirements file and install dependencies ---
     
     if not REQUIREMENTS_FILE.exists() or REQUIREMENTS_FILE.stat().st_size == 0:
-        print("[WARNING] Requirements file is empty or not created. Skipping final dependency install.")
+        print(f"[WARNING] Requirements file not found or is empty at {REQUIREMENTS_FILE}. Skipping dependency installation.")
         return
         
-    print(f"[SUCCESS] Dependencies analyzed and written to {REQUIREMENTS_FILE.name}.")
-
-
-    # --- 5d. Install dependencies from the generated requirements.txt ---
-    print(f"[INFO] Installing final dependencies from {REQUIREMENTS_FILE.name} into Venv...")
+    print(f"[INFO] Installing dependencies from {REQUIREMENTS_FILE.name} into Venv...")
     
+    # Use a robust installation command with --no-build-isolation
     install_command = [
         str(python_executable), 
         '-m', 
@@ -117,6 +98,7 @@ def create_and_install_venv(repo_path: Path):
         '--no-cache-dir', 
         '-r', 
         str(REQUIREMENTS_FILE),
+        '--no-build-isolation',
         '--use-deprecated=legacy-resolver'
     ]
     
@@ -125,4 +107,4 @@ def create_and_install_venv(repo_path: Path):
         "Final dependency installation"
     )
     
-    print("[SUCCESS] All final dependencies installed successfully.")
+    print("[SUCCESS] All external dependencies installed successfully.")

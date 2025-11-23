@@ -19,12 +19,14 @@ from downloader import Downloader
 from paper_extracter import PaperParser
 from demo_creator import DemoCreator
 from venv_create import create_and_install_venv
+from requirements_extract import RequirementsExtractor
 
 def run_pipeline(input_path: str):
     """
     The main orchestration function for the pipeline.
     """
-    downloader = Downloader(target_dir=str(TMP_DIR))
+    # Downloader uses the target_dir for cleanup and cloning
+    downloader = Downloader(target_dir=str(TMP_DIR)) 
     pdf_path: Optional[Path] = None
     
     # Ensure the TMP_DIR exists before starting operations
@@ -68,13 +70,19 @@ def run_pipeline(input_path: str):
         
         print(f"[SUCCESS] Repository successfully cloned into: {cloned_repo_path}")
         
-        # STEP 4: Dependency Extraction (now integrated into Step 5 using pipreqs)
-        print("\n--- STEP 4: Dependency Extraction is integrated into Step 5 using pipreqs. ---")
-
-        # STEP 5: Virtual Environment Setup & Installation
-        create_and_install_venv(cloned_repo_path)
-
+        # --- NEW STEP 4: Dependency Extraction using our custom tool ---
+        print("\n--- STEP 4: Extracting Dependencies using RequirementsExtractor... ---")
+        extractor = RequirementsExtractor(output_dir=str(TMP_DIR))
+        extractor.analyze_repo(cloned_repo_path)
+        print(f"[SUCCESS] Dependencies written to: {REQUIREMENTS_FILE}")
+        
+        # --- UPDATED STEP 5: Virtual Environment Setup & Installation ---
+        # This function now only needs to create the venv and run `pip install -r requirements.txt`
+        print("\n--- STEP 5: Virtual Environment Setup & Installation... ---")
+        create_and_install_venv(cloned_repo_path) # Assumes this function is updated
+        
         # STEP 6: Demo Creation
+        print("\n--- STEP 6: Demo Creation... ---")
         DemoCreator.generate_demo(cloned_repo_path)
 
     # --- Error Handling ---
@@ -88,7 +96,8 @@ def run_pipeline(input_path: str):
         print(f"[ERROR] Data validation failed: {e}", file=sys.stderr)
         sys.exit(1)
     except RuntimeError as e:
-        print(f"[ERROR] Command execution failed (e.g., git, venv, or pipreqs): {e}", file=sys.stderr)
+        # Includes command execution failures (git, venv, or pip, or our extractor run)
+        print(f"[ERROR] Command execution failed: {e}", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
         print(f"[FATAL] An unexpected error occurred: {type(e).__name__} - {e}", file=sys.stderr)
