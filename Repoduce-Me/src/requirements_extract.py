@@ -169,6 +169,15 @@ class RequirementsExtractor:
         """
         for filename in self.REQUIREMENTS_FILES:
             file_path = self.repo_dir / filename
+
+            if file_path.name == "pyproject.toml":
+                print("[INFO] Found pyproject.toml. Using pyproject-based installation.")
+                return ["pyproject"]
+            
+            if file_path.name == "setup.cfg" or file_path.name == "setup.py":
+                print("[INFO] Found setup.cfg. Using setup.cfg installation.")
+                return ["setup"]
+
             if file_path.exists():
                 print(f"[INFO] Found existing dependency file: {filename}. Using contents for installation.")
                 dependencies = self._get_dependencies_from_file(file_path)
@@ -204,6 +213,9 @@ class RequirementsExtractor:
         """
         # 1. Check for requirements.txt style files
         final_dependencies = self.find_existing_requirements()
+
+        if final_dependencies[0] in ["pyproject", "setup"]:
+            return final_dependencies
         
         if final_dependencies is None:
             # 2. If not found, perform dynamic analysis as the fallback
