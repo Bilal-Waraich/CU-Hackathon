@@ -16,133 +16,31 @@ import argparse
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional, Set
+from typing import Set
 
-# Import pipeline components
 from downloader import Downloader
 from paper_extracter import PaperParser
 from requirements_extract import RequirementsExtractor
 from venv_create import setup_venv_and_install, get_venv_python
 from demo_creator import DemoCreator
 
+from utils import get_installed_packages, clone_repository, run_demo
 
-# Configuration
-TMP_DIR = "tmp"
-WORKSPACE_DIR = "workspace"
-DEMO_FILENAME = "generated_demo.py"
-
-
-def get_installed_packages(venv_python: str) -> Set[str]:
-    """
-    Get a set of installed package names from the virtual environment.
-    """
-    try:
-        result = subprocess.run(
-            [venv_python, "-m", "pip", "list", "--format=freeze"],
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-        
-        if result.returncode != 0:
-            return set()
-        
-        packages: Set[str] = set()
-        for line in result.stdout.strip().split('\n'):
-            if '==' in line:
-                pkg_name = line.split('==')[0].strip().lower()
-                packages.add(pkg_name)
-            elif line.strip():
-                packages.add(line.strip().lower())
-        
-        return packages
-        
-    except Exception:
-        return set()
-
-
-def clone_repository(github_url: str, target_dir: str) -> bool:
-    """
-    Clone a GitHub repository to the target directory.
-    """
-    print(f"Attempting to clone '{github_url}' into '{target_dir}'...")
-    
-    # Remove existing directory if present
-    if os.path.exists(target_dir):
-        shutil.rmtree(target_dir)
-    
-    try:
-        result = subprocess.run(
-            ["git", "clone", "--depth", "1", github_url, target_dir],
-            capture_output=True,
-            text=True,
-            timeout=300
-        )
-        
-        if result.returncode == 0:
-            print("Cloning successful.")
-            return True
-        else:
-            print(f"[ERROR] Git clone failed: {result.stderr}")
-            return False
-            
-    except subprocess.TimeoutExpired:
-        print("[ERROR] Git clone timed out after 300 seconds.")
-        return False
-    except FileNotFoundError:
-        print("[ERROR] Git is not installed or not in PATH.")
-        return False
-    except Exception as e:
-        print(f"[ERROR] Unexpected error during clone: {e}")
-        return False
-
-
-def run_demo(venv_python: str, demo_path: str, repo_path: str) -> bool:
-    """
-    Execute the generated demo script.
-    """
-    print(f"\n--- Running Demo: {demo_path} ---")
-    
-    try:
-        result = subprocess.run(
-            [venv_python, demo_path],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            timeout=600
-        )
-        
-        print("Demo Output:")
-        print(result.stdout)
-        
-        if result.stderr:
-            print("Demo Errors:")
-            print(result.stderr)
-        
-        if result.returncode == 0:
-            print("[SUCCESS] Demo completed successfully!")
-            return True
-        else:
-            print(f"[WARNING] Demo exited with code {result.returncode}")
-            return False
-            
-    except subprocess.TimeoutExpired:
-        print("[ERROR] Demo timed out after 600 seconds.")
-        return False
-    except Exception as e:
-        print(f"[ERROR] Failed to run demo: {e}")
-        return False
-
+from constants import (
+    TMP_DIR, 
+    WORKSPACE_DIR,
+    DEMO_FILENAME
+)
 
 def main():
     parser = argparse.ArgumentParser(
         description="Repoduce-Me: Scientific Code Reproducibility Pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  python main.py https://arxiv.org/pdf/2207.12274
-  python main.py paper.pdf --github https://github.com/owner/repo
-  python main.py paper.pdf --tmp --auto-run
+            Examples:
+            python main.py https://arxiv.org/pdf/2207.12274
+            python main.py paper.pdf --github https://github.com/owner/repo
+            python main.py paper.pdf --tmp --auto-run
         """
     )
     
@@ -182,18 +80,14 @@ Examples:
     
     args = parser.parse_args()
     
-    # Determine working directory
     work_dir = TMP_DIR if args.tmp else WORKSPACE_DIR
     
-    # Create working directory
     os.makedirs(work_dir, exist_ok=True)
     
-    # Define paths - all as absolute paths to avoid confusion
     work_dir_abs = os.path.abspath(work_dir)
     repo_dir = os.path.join(work_dir_abs, "repo")
     venv_dir = os.path.join(work_dir_abs, ".venv_repro")
     
-    # Demo file goes INSIDE the repo directory (for batch_eval.py compatibility)
     demo_path = os.path.join(repo_dir, DEMO_FILENAME)
     
     print(f"\n--- Starting Pipeline Execution with Input: {args.input} ---")
@@ -303,12 +197,8 @@ Examples:
             print("--- STEP 6: Generating Demo Script... ---")
             
             try:
-                # Get installed packages to pass to the demo creator
                 installed_packages = get_installed_packages(venv_python)
                 
-                # Create demo creator
-                # repo_path: where the repo is cloned
-                # output_filename: JUST the filename, not a path
                 creator = DemoCreator(
                     repo_path=repo_dir,
                     output_filename=DEMO_FILENAME,

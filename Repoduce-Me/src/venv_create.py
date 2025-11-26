@@ -50,9 +50,9 @@ def get_venv_pip(venv_path: str) -> str:
     Returns:
         Path to the pip executable inside the venv.
     """
-    if os.name == 'nt':  # Windows
+    if os.name == 'nt': 
         return os.path.join(venv_path, 'Scripts', 'pip.exe')
-    else:  # Unix/macOS
+    else: 
         return os.path.join(venv_path, 'bin', 'pip')
 
 
@@ -81,7 +81,7 @@ def run_command(
             env=env,
             capture_output=True,
             text=True,
-            timeout=600  # 10 minute timeout
+            timeout=600  
         )
         return result.returncode, result.stdout, result.stderr
     except subprocess.TimeoutExpired:
@@ -110,14 +110,12 @@ def create_virtual_environment(
     if python_executable is None:
         python_executable = sys.executable
     
-    # Remove existing venv if present
     if os.path.exists(venv_path):
         print(f"[INFO] Removing existing virtual environment at {venv_path}...")
         shutil.rmtree(venv_path)
     
     print(f"[INFO] Creating virtual environment at {venv_path} using {python_executable}...")
     
-    # Create the virtual environment
     returncode, stdout, stderr = run_command(
         [python_executable, "-m", "venv", venv_path],
         description="venv creation"
@@ -126,12 +124,10 @@ def create_virtual_environment(
     if returncode != 0:
         raise VenvCreationError(f"Failed to create virtual environment: {stderr}")
     
-    # Verify the venv Python exists
     venv_python = get_venv_python(venv_path)
     if not os.path.exists(venv_python):
         raise VenvCreationError(f"Venv Python not found at {venv_python}")
     
-    # Verify the venv Python works
     returncode, stdout, stderr = run_command(
         [venv_python, "--version"],
         description="venv Python version check"
@@ -158,7 +154,6 @@ def upgrade_build_tools(venv_python: str) -> None:
     """
     print("[INFO] Upgrading pip, setuptools, and wheel in the virtual environment...")
     
-    # Create environment with SETUPTOOLS_USE_DISTUTILS to avoid conflicts
     env = os.environ.copy()
     env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
     
@@ -171,7 +166,6 @@ def upgrade_build_tools(venv_python: str) -> None:
     
     if returncode != 0:
         print(f"[WARNING] Build tools upgrade had issues: {stderr}")
-        # Don't fail here, try to continue
     else:
         print("[SUCCESS] Core build tools upgraded.")
 
@@ -247,7 +241,6 @@ def install_from_pyproject_or_setup(
     env = os.environ.copy()
     env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
     
-    # Strategy 1: Try editable install if requested
     if editable:
         print(f"[INFO] Attempting editable install from {repo_path}...")
         returncode, stdout, stderr = run_command(
@@ -279,7 +272,6 @@ def install_from_pyproject_or_setup(
     
     print(f"[WARNING] Regular install failed: {stderr[:300]}")
     
-    # Strategy 3: Try with build isolation
     print("[INFO] Retrying with build isolation...")
     returncode, stdout, stderr = run_command(
         [venv_python, "-m", "pip", "install", "--no-cache-dir", "."],
@@ -294,7 +286,6 @@ def install_from_pyproject_or_setup(
     
     print(f"[WARNING] Build isolation install failed: {stderr[:300]}")
     
-    # Strategy 4: Try installing just the dependencies from pyproject.toml
     pyproject_path = Path(repo_path) / "pyproject.toml"
     if pyproject_path.exists():
         print("[INFO] Attempting to extract and install dependencies from pyproject.toml...")
@@ -404,20 +395,15 @@ def setup_venv_and_install(
         preinstall_deps = ["numpy", "scipy"]
     
     try:
-        # Step 1: Create the virtual environment
         venv_python = create_virtual_environment(venv_path, python_executable)
         
-        # Step 2: Upgrade build tools (pip, setuptools, wheel)
         upgrade_build_tools(venv_python)
         
-        # Step 3: Pre-install critical build dependencies
         if preinstall_deps:
             preinstall_build_dependencies(venv_python, preinstall_deps)
         
-        # Step 4: Detect installation method
         install_method = detect_install_method(repo_path)
         
-        # Step 5: Install based on detected method
         success = False
         
         if install_method in ('pyproject', 'setup'):
@@ -426,7 +412,7 @@ def setup_venv_and_install(
             success = install_from_requirements(venv_python, repo_path)
         else:
             print("[WARNING] No installation method detected. Venv created but no deps installed.")
-            success = True  # Venv created successfully, just no deps
+            success = True
         
         if success:
             print(f"[SUCCESS] Virtual environment ready at: {venv_path}")
@@ -443,7 +429,6 @@ def setup_venv_and_install(
         return False, ""
 
 
-# For backwards compatibility and direct usage
 def create_venv_and_install_dependencies(
     venv_path: str,
     repo_path: str,
@@ -464,7 +449,6 @@ def create_venv_and_install_dependencies(
 
 
 if __name__ == "__main__":
-    # Example usage / testing
     import argparse
     
     parser = argparse.ArgumentParser(description="Create venv and install dependencies")

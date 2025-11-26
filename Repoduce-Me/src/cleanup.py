@@ -17,9 +17,10 @@ import argparse
 import shutil
 from pathlib import Path
 
-TMP_DIR = Path("tmp")
-WORKSPACE_DIR = Path("workspace")
-
+from constants import (
+    TMP_DIR, 
+    WORKSPACE_DIR, 
+)
 
 def wipe(path: Path):
     if not path.exists():

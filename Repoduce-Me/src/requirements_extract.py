@@ -26,7 +26,6 @@ class RequirementsExtractor:
         - [<deps...>]             => install via `pip install -r tmp/requirements.txt`
     """
 
-    # --- 1. Comprehensive Standard Library Modules (Exclusion List) ---
     STANDARD_LIBRARY: Set[str] = {
         '__future__', '__main__', '_dummy_thread', '_thread', 'abc', 'aifc',
         'antigravity', 'argparse', 'array', 'ast', 'asynchat', 'asyncio',
@@ -90,7 +89,6 @@ class RequirementsExtractor:
         "requirements-base.txt",
     ]
 
-    # Directories to skip during import analysis
     IGNORE_DIRS: Set[str] = {
         ".git",
         ".hg",
@@ -147,14 +145,11 @@ class RequirementsExtractor:
         """
         if not module_name:
             return False
-
-        # e.g. <repo>/foo.py or <repo>/foo/__init__.py
         if (self.repo_dir / f"{module_name}.py").exists():
             return True
 
         pkg_dir = self.repo_dir / module_name
         if pkg_dir.is_dir():
-            # if there's an __init__.py, treat as local package
             if (pkg_dir / "__init__.py").exists():
                 return True
 
@@ -167,7 +162,6 @@ class RequirementsExtractor:
         if not file_path.suffix == ".py":
             return
 
-        # Skip hidden files
         if file_path.name.startswith("."):
             return
 
@@ -189,15 +183,12 @@ class RequirementsExtractor:
                 if not module_name:
                     continue
 
-                # 1) Skip stdlib
                 if module_name in self.STANDARD_LIBRARY:
                     continue
 
-                # 2) Skip local imports
                 if self._is_local_import(module_name):
                     continue
 
-                # 3) Map module -> package if needed
                 package_name = self.MODULE_TO_PACKAGE.get(module_name, module_name)
 
                 self.all_dependencies.add(package_name)
@@ -218,9 +209,8 @@ class RequirementsExtractor:
                     if not line or line.startswith("#"):
                         continue
 
-                    # Strip inline comments and env markers
-                    line = re.sub(r"[ \t]*#.*$", "", line)   # trailing comments
-                    line = re.sub(r";.*$", "", line)         # env markers
+                    line = re.sub(r"[ \t]*#.*$", "", line)  
+                    line = re.sub(r";.*$", "", line)         
 
                     cleaned = line.strip()
                     if cleaned:
@@ -238,20 +228,17 @@ class RequirementsExtractor:
         """
         repo_root = self.repo_dir
 
-        # 1) Modern pyproject-based project
         pyproject = repo_root / "pyproject.toml"
         if pyproject.exists():
             print("[INFO] Found pyproject.toml. Will install via `pip install .`.")
             return ["__USE_PYPROJECT__"]
 
-        # 2) Legacy setuptools project
         setup_cfg = repo_root / "setup.cfg"
         setup_py = repo_root / "setup.py"
         if setup_cfg.exists() or setup_py.exists():
             print("[INFO] Found setup.cfg/setup.py. Will install via `pip install .`.")
             return ["__USE_SETUPTOOLS__"]
 
-        # 3) requirements*.txt files
         for filename in self.REQUIREMENTS_FILES:
             file_path = repo_root / filename
             if not file_path.exists():
@@ -260,7 +247,6 @@ class RequirementsExtractor:
             print(f"[INFO] Found existing dependency file: {filename}. Using contents.")
             deps = self._get_dependencies_from_file(file_path)
 
-            # Filter out obvious stdlib mistakes (very defensive)
             filtered = [
                 dep for dep in deps
                 if dep.split(">")[0].split("=")[0].split("<")[0].split("~")[0].strip()
@@ -278,7 +264,6 @@ class RequirementsExtractor:
     def analyze_imports(self) -> None:
         """Walk over the repo and collect imported external modules."""
         for root, dirs, files in os.walk(self.repo_dir):
-            # prune ignored dirs in-place
             dirs[:] = [d for d in dirs if d not in self.IGNORE_DIRS and not d.startswith(".")]
 
             for file_name in files:
@@ -294,7 +279,6 @@ class RequirementsExtractor:
             - ['__USE_SETUPTOOLS__']  -> caller should run `pip install .`
             - [list of deps]          -> caller should install from requirements.txt
         """
-        # 1) Try existing metadata/files
         deps = self.find_existing_requirements()
 
         if deps is not None and deps[0] in ("__USE_PYPROJECT__", "__USE_SETUPTOOLS__"):
@@ -304,7 +288,6 @@ class RequirementsExtractor:
             self._write_requirements_file(deps)
             return deps
 
-        # Case 3: nothing found -> dynamic analysis
         print("[INFO] No existing requirements files found. Performing dynamic import analysis...")
         self.analyze_imports()
         deps = sorted(self.all_dependencies)
