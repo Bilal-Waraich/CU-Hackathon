@@ -104,7 +104,6 @@ class PaperParser:
                 seen.add(link)
                 unique_links.append(link)
 
-        # If no links found in PDF, try LLM search
         if not unique_links:
             paper_title = self._extract_paper_title(reader)
             if paper_title:

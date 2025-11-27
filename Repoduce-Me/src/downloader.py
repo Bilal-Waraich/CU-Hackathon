@@ -16,7 +16,6 @@ class Downloader:
     """
     
     def __init__(self, target_dir: str = "tmp", max_retries: int = 5, retry_delay: float = 1.0):
-        # target_dir is primarily used for PDF downloads and default cleanup
         self.target_dir = target_dir
         self.max_retries = max_retries
         self.retry_delay = retry_delay
@@ -26,20 +25,15 @@ class Downloader:
         Custom error handler for shutil.rmtree to handle Windows permission errors.
         (Retained and used for robust directory deletion)
         """
-        # The exception type is often PermissionError (a subclass of OSError) on WinError 5
         if issubclass(exc_info[0], PermissionError) or issubclass(exc_info[0], OSError):
-            # Attempt to change file permissions to allow writing/deleting
             os.chmod(path, stat.S_IWUSR | stat.S_IWRITE)
             
             try:
-                # Retry the removal function
                 func(path)
                 return  
             except Exception:
-                # If retry fails, let the error propagate 
                 pass 
         
-        # If not a recognized cleanup error, or if retry failed, raise the original exception
         raise exc_info[0](exc_info[1]).with_traceback(exc_info[2])
     
     def _cleanup_single_dir(self, directory: str) -> bool:
@@ -71,9 +65,7 @@ class Downloader:
         CRITICAL FIX: The target_path argument is now used as the destination in the git command.
         """
         
-        # We perform cleanup *before* cloning, targeting the specific destination path.
         try:
-            # We use the target_path provided by main.py for cleanup
             self._cleanup_single_dir(target_path) 
         except Exception:
             return False
@@ -85,7 +77,6 @@ class Downloader:
         if branch:
             command.extend(['--branch', branch])
         
-        # CRITICAL FIX: Use the flexible target_path provided by main.py
         command.extend([github_link, target_path])
 
         try:
@@ -133,7 +124,6 @@ class Downloader:
 
         for attempt in range(1, self.max_retries + 1):
             try:
-                # Use urllib.request as per original user code
                 with urllib.request.urlopen(pdf_url) as response:
                     if response.status != 200:
                         raise OSError(f"HTTP status {response.status}")

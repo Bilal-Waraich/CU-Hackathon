@@ -36,20 +36,16 @@ class DemoCreator:
             max_readme_chars: Maximum characters to read from README.
             installed_packages: Set/list of installed package names.
         """
-        # Ensure repo_path is a Path
         self.repo_path = Path(repo_path).resolve()
         self.output_path = self.repo_path / str(output_filename)
         
-        # CRITICAL: Ensure max_readme_chars is an integer
         try:
             self.max_readme_chars: int = int(max_readme_chars)
         except (TypeError, ValueError):
             self.max_readme_chars = 8000
         
-        # CRITICAL: Ensure installed_packages is a proper set of strings
         self.installed_packages: Set[str] = self._normalize_packages(installed_packages)
 
-        # Lazy initialization - don't create LLM until needed
         self._llm: Optional[ConstructorModel] = None
 
     def _normalize_packages(self, packages: Any) -> Set[str]:
@@ -64,10 +60,8 @@ class DemoCreator:
             return {str(p) for p in packages}
         
         if isinstance(packages, str):
-            # Single package name
             return {packages}
         
-        # Try to iterate over it
         try:
             return {str(p) for p in packages}
         except TypeError:
@@ -80,7 +74,6 @@ class DemoCreator:
             self._llm = ConstructorModel(model="gpt-5.1")
         return self._llm
 
-    # ---------- Public API ----------
 
     def generate_demo(self) -> Optional[Path]:
         """
@@ -95,14 +88,12 @@ class DemoCreator:
         print("\n=== DEMO GENERATION: START ===")
         print(f"[INFO] Repository path: {self.repo_path}")
 
-        # 1) Load README
         readme_text = self._load_readme()
         if not readme_text:
             print("[WARN] No README found in repository root. Skipping demo generation.")
             print("=== DEMO GENERATION: ABORTED (NO README) ===")
             return None
 
-        # 2) Load example code snippets (if any)
         example_snippets = self._load_example_snippets()
         if example_snippets and len(example_snippets.strip()) > 0:
             print("[INFO] Example snippets found and included in the LLM prompt.")
@@ -110,10 +101,8 @@ class DemoCreator:
             example_snippets = ""
             print("[INFO] No example snippets found; proceeding with README only.")
 
-        # 3) Build prompt for Constructor
         prompt = self._build_prompt(readme_text, example_snippets)
 
-        # 4) Call Constructor LLM via LangChain interface
         print("[INFO] Calling Constructor LLM to generate demo code...")
         try:
             response = self.llm.invoke(prompt)
@@ -122,17 +111,13 @@ class DemoCreator:
             print("=== DEMO GENERATION: FAILED DURING LLM CALL ===")
             return None
 
-        # 5) Extract raw text from response
         raw_response = getattr(response, "content", str(response))
-
-        # 6) Strip markdown fences if they slip through
         demo_code = self._extract_code(raw_response)
         if not demo_code or len(demo_code.strip()) == 0:
             print("[ERROR] LLM response did not contain any recognizable Python code.")
             print("=== DEMO GENERATION: FAILED (EMPTY CODE) ===")
             return None
 
-        # 7) Persist generated script
         try:
             self._write_demo(demo_code)
         except Exception as e:
@@ -144,7 +129,6 @@ class DemoCreator:
         print("=== DEMO GENERATION: COMPLETE ===")
         return self.output_path
 
-    # ---------- Internal helpers ----------
 
     def _load_readme(self) -> Optional[str]:
         """
@@ -167,7 +151,6 @@ class DemoCreator:
             print(f"[ERROR] Failed to read README: {e}")
             return None
 
-        # CRITICAL: Use explicit int conversion for comparison
         text_len: int = len(text)
         max_chars: int = int(self.max_readme_chars)
         
@@ -195,7 +178,6 @@ class DemoCreator:
         snippets: List[str] = []
         total_length: int = 0
         
-        # CRITICAL: Use explicit integer constants
         MAX_FILE_SIZE: int = 8000
         MAX_TOTAL_SIZE: int = 12000
 
@@ -243,10 +225,8 @@ class DemoCreator:
         """
         repo_name = self.repo_path.name
 
-        # Format installed packages list for the prompt
         packages_info = ""
         
-        # CRITICAL: Get count as explicit int
         num_packages: int = len(self.installed_packages)
         
         if num_packages > 0:
@@ -345,7 +325,6 @@ class DemoCreator:
         if "```" not in raw_response:
             return raw_response
 
-        # grab the first fenced code block
         match = re.search(r"```(?:python)?\s*(.*?)```", raw_response, re.DOTALL | re.IGNORECASE)
         if match:
             return match.group(1)
